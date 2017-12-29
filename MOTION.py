@@ -9,10 +9,6 @@ from scipy.signal import butter, filtfilt, cheby1
 #**************************************************************************************************************************
 #*************************************************CODE START***************************************************************
 #**************************************************************************************************************************
-
-filename ='/media/cat/4TB_ephys/in_vivo/james/ANM303491_Ph201/20151029-1425-A1/output.avi'
-print filename
-
 class MOTION(object):
     ''' Class to detect motion in behaviour video;
         self.crop() to select only part of video (speeds up analysis)
