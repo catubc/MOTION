@@ -37,15 +37,31 @@ class MOTION(object):
 	    Currently only rGb channel saved; possibly might improve to average all
 	'''
         #**************** SELECT CROPPED AREA TO TRACK MOTION (smaller is faster) **********************
-        #Load sample frame: "image_original"
-        camera = cv2.VideoCapture(self.filename)
-        #cap = cv2.VideoCapture('test.avi')
-	self.frame_rate = camera.get(5)
-	ret,frame = camera.read()
-        image_original = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        cv2.destroyAllWindows()
-        camera.release()
+        #Load and save to disk # frames, frame rate and sample frame for cropping 
+	if os.path.exists(os.path.split(self.filename)[0]+"/nframes.txt")==False:
+	    camera = cv2.VideoCapture(self.filename)
+	    self.frame_rate = camera.get(5)
+	    ctr=0
+	    print "reading frames"
+	    while True:
+		print (ctr)
+		(grabbed, frame) = camera.read()
+		if not grabbed: break
+		ctr+=1
+		if ctr==100: 
+		    image_original = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+		    np.save(os.path.split(self.filename)[0]+"/original_image.npy", image_original)
+	    self.n_frames=ctr
+	    np.savetxt(os.path.split(self.filename)[0]+"/nframes.txt",[self.n_frames])
+	    np.savetxt(os.path.split(self.filename)[0]+"/frame_rate.txt",[self.frame_rate])
+	    cv2.destroyAllWindows()
+	    camera.release()
+	else:
+	    image_original = np.load(os.path.split(self.filename)[0]+"/original_image.npy")
+	    self.n_frames = np.loadtxt(os.path.split(self.filename)[0]+"/nframes.txt",dtype='int32')
+	    self.frame_rate = np.loadtxt(os.path.split(self.filename)[0]+"/frame_rate.txt",dtype='float32')
         
+	self.frame_xwidth = len(image_original); self.frame_ywidth = len(image_original[0])
         #Run cropping functions on sample frame
 	self.crop_frame_box(image_original, motion_correct_flag=True)      #DEFINE BOX AREAS FOR CROPPING; first define area for register
 	self.crop_frame_box(image_original, motion_correct_flag=False)      #DEFINE BOX AREAS FOR CROPPING; first define area for register
@@ -59,30 +75,33 @@ class MOTION(object):
 	self.x1 = crop_area['x1']; self.x2 = crop_area['x2'] 
 	self.y1 = crop_area['y1']; self.y2 = crop_area['y2']
 	if os.path.exists(self.filename[:-4]+'_'+self.area+'_cropped.npy')==False:
-	    print "... converting .avi -> .npy files (averaging over RGB vals) ..."
+	    print "... converting .avi -> .npy files (only Green channel) ..."
+	    if os.path.exists(self.filename[:-4]+'.npy')==False:
+		original_frames = np.zeros((self.n_frames, self.frame_xwidth,self.frame_ywidth),dtype=np.uint8)
+	    cropped_frames = np.zeros((self.n_frames, self.x2-self.x1,self.y2-self.y1),dtype=np.uint8)
+	    registry_frames = np.zeros((self.n_frames, self.x2_registry-self.x1_registry,self.y2_registry-self.y1_registry),dtype=np.uint8)
 	    camera = cv2.VideoCapture(self.filename)
-	    original_frames = []
-	    cropped_frames = []
-	    registry_frames = []
 	    ctr = 0
 	    while True:
 		if ctr%1000==0: print " loading frame: ", ctr
-		if ctr>15000: 
-		    print "...************ too many frames, exiting on 15000..."
-		    break
+		if 'luis' in self.filename: 
+		    if ctr>15000: 
+			print "...************ too many frames, exiting on 15000..."
+			break
 		(grabbed, frame) = camera.read()
 		if not grabbed: break
 		
 		#Save copy of frame for .npy file
-		original_frames.append(frame[:,:,1])		#Save average of RGB chans
+		if os.path.exists(self.filename[:-4]+'.npy')==False:
+		    original_frames[ctr]=frame[:,:,1]		#Save green ch only
 		#original_frames.append(np.uint8(np.mean(frame, axis=2)))		#Save average of RGB chans
 		
 		#Crop FOV for analysis
-		cropped_frames.append(frame[:,:,1][self.x1:self.x2,self.y1:self.y2])
+		cropped_frames[ctr]=frame[:,:,1][self.x1:self.x2,self.y1:self.y2]
 		#cropped_frames.append(np.uint8(np.mean(frame[self.x1:self.x2,self.y1:self.y2],axis=2)))
 		
 		#Crop FOV for registry
-		registry_frames.append(frame[:,:,1][self.x1_registry:self.x2_registry,self.y1_registry:self.y2_registry])
+		registry_frames[ctr]=frame[:,:,1][self.x1_registry:self.x2_registry,self.y1_registry:self.y2_registry]
 		#registry_frames.append(np.uint8(np.mean(frame[self.x1_registry:self.x2_registry,self.y1_registry:self.y2_registry],axis=2)))
 		
 		ctr+=1
@@ -93,7 +112,6 @@ class MOTION(object):
 	    #Save cropped movie area and registry area 
 	    np.save(self.filename[:-4]+'_'+self.area+'_cropped', cropped_frames)	#just cropped movie
 	    np.save(self.filename[:-4]+'_registry_cropped', registry_frames)	#just cropped movie
-	    
 	    
 
     def binarize_frames(self):
@@ -663,7 +681,7 @@ class MOTION(object):
             for k in range(len(self.decimated_frames)):
 		#print self.decimated_frames[k].shape
                 #subsampled_array.append(scipy.misc.imresize(data_2D_array[k], 0.2, interp='bilinear', mode=None))
-                subsampled_array.append(scipy.misc.imresize(self.decimated_frames[k], 0.3, interp='bilinear', mode=None))
+                subsampled_array.append(scipy.misc.imresize(self.decimated_frames[k], 0.1, interp='bilinear', mode=None))
 
             self.data_subsampled = np.array(subsampled_array)
             np.save(subsample_filename, self.data_subsampled)
@@ -994,7 +1012,7 @@ class MOTION(object):
 	fname_registry = self.filename[:-4]+"_registry_cropped.npy"  #This is the cropped FOV specifically for registration
 	fname_original = self.filename[:-4]+".npy"				#This is the entire movie
 	fname_cropped = self.filename[:-4]+"_"+self.area+"_cropped.npy"	#This is the area FOV 
-	original_mov = np.load(fname_original,mmap_mode='c')
+	#original_mov = np.load(fname_original,mmap_mode='c')
 	all_mov = np.load(fname_registry)
 	crop_mov = np.load(fname_cropped)
 	
@@ -1022,7 +1040,7 @@ class MOTION(object):
 	    c, dview, n_processes = cm.cluster.setup_cluster(backend='local', n_processes=None, single_thread=False)
 
 	    #Load cropped image and use it to align larger movie
-	    original_mov = np.load(fname_original,mmap_mode='c')
+	    #original_mov = np.load(fname_original,mmap_mode='c')
 	    all_mov = np.load(fname_registry)
 	    crop_mov = np.load(fname_cropped)
 	    print "...cropped movie shape...", all_mov.shape
@@ -1051,26 +1069,30 @@ class MOTION(object):
 	    
 	    #Save registered original movie and the registry FOV 
 	    reg_mov = np.zeros(all_mov.shape, dtype=np.uint8)
-	    reg_original_mov = np.zeros(original_mov.shape, dtype=np.uint8)
+	    #reg_original_mov = np.zeros(original_mov.shape, dtype=np.uint8)
 	    for k in range(len(all_mov)):
 		if k%1000==0: print "... shifting frame: ",k 
 		reg_mov[k] = np.roll(np.roll(all_mov[k], int(mc.shifts_rig[k][0]), axis=0), int(mc.shifts_rig[k][1]), axis=1)
-		reg_original_mov[k] = np.roll(np.roll(original_mov[k], int(mc.shifts_rig[k][0]), axis=0), int(mc.shifts_rig[k][1]), axis=1)
+		#reg_original_mov[k] = np.roll(np.roll(original_mov[k], int(mc.shifts_rig[k][0]), axis=0), int(mc.shifts_rig[k][1]), axis=1)
 
 	    #tiff.imsave(fname[:-4]+"_registered.tif", reg_mov)
-	    np.save(fname_original[:-4]+"_registered.npy", reg_original_mov)
+	    #np.save(fname_original[:-4]+"_registered.npy", reg_original_mov)
 	    np.save(fname_registry[:-4]+"_registered.npy", reg_mov)
-	    
-	shifts_rig = np.load(fname_registry[:-4]+"_shifts_rig.npy")
+	
+	
+	if os.path.exists(fname_cropped[:-4]+"_registered.npy")==False:
+	    shifts_rig = np.load(fname_registry[:-4]+"_shifts_rig.npy")
 
-	print ("... shifting image stack based on motion correction...")
+	    print ("... shifting image stack based on motion correction...")
 
-	reg_cropped_mov = np.zeros(crop_mov.shape, dtype=np.uint8)
-	for k in range(len(all_mov)):
-	    if k%1000==0: print "... shifting frame: ",k 
-	    reg_cropped_mov[k] = np.roll(np.roll(crop_mov[k], int(shifts_rig[k][0]), axis=0), int(shifts_rig[k][1]), axis=1)
-	    
-	np.save(fname_cropped[:-4]+"_registered.npy", reg_cropped_mov)
+	    reg_cropped_mov = np.zeros(crop_mov.shape, dtype=np.uint8)
+	    for k in range(len(all_mov)):
+		if k%1000==0: print "... shifting frame: ",k 
+		reg_cropped_mov[k] = np.roll(np.roll(crop_mov[k], int(shifts_rig[k][0]), axis=0), int(shifts_rig[k][1]), axis=1)
+		
+	    np.save(fname_cropped[:-4]+"_registered.npy", reg_cropped_mov)
+
+	    imageio.mimwrite(fname_registry[:-4]+"_registered.mp4", reg_cropped_mov, fps = self.frame_rate)
 
 
 	if False:
@@ -1343,7 +1365,6 @@ class MOTION(object):
             self.clustered_pts = self.manual_cluster(indexes=indexes)		#not sure the self attribute is still required
             return 
 	else:
-	    
 	    print "... clustering method not implemented ..."
 	    quit()
 	   
@@ -1501,7 +1522,7 @@ class MOTION(object):
 
 	    self.fig = plt.figure()
 	    self.ax1 = self.fig.add_subplot(121) #plt.subplot(1,2,1)
-	    self.img = self.ax1.imshow(self.display_frames[0],animated=True)
+	    self.img = self.ax1.imshow(self.display_frames[0],vmin=0, vmax=255, animated=True)
 	    
 	    self.ax2 = self.fig.add_subplot(122) #plt.subplot(1,2,2)
 	    self.coords=[]
